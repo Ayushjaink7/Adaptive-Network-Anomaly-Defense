@@ -1,0 +1,11 @@
+{
+  "monitored_subnet": "192.168.64.0/24",
+  "flow_idle_timeout_sec": 120.0,
+  "zscore_threshold": 3.0,
+  "if_contamination": 0.05,
+  "risk_low_max": 35.0,
+  "risk_medium_max": 70.0,
+  "ssh_bruteforce_flow_threshold": 15,
+  "syn_flood_syn_ratio": 0.85,
+  "syn_flood_min_packets": 30
+}
