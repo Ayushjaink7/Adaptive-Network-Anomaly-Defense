@@ -10,6 +10,7 @@ import pandas as pd
 from .baseline import StatisticalBaseline, baseline_anomaly_mask, fit_baseline
 from .config import DefenseConfig
 from .detector import AnomalyDetectorBundle, ModelKind, train_detector
+from .explain import ShapExplainer, format_top_k
 from .features import (
     augment_security_principle_flags,
     extract_flow_records_from_pcap,
@@ -99,6 +100,7 @@ def score_pcap(
     artifacts: TrainedArtifacts,
     log_path: Path | None = None,
     enforce: bool = False,
+    explain: bool = True,
 ) -> pd.DataFrame:
     df = build_labeled_frame(pcap_path, artifacts.cfg)
     X, _ = featurize_for_ml(df)
@@ -109,6 +111,8 @@ def score_pcap(
 
     stat_mask = baseline_anomaly_mask(X, artifacts.baseline, artifacts.cfg)
     scorer = RiskScorer(artifacts.cfg)
+    # SHAP top-3 features for every BLOCK decision (skipped quietly if shap isn't installed)
+    shap_x = ShapExplainer.try_create(artifacts.detector.pipeline_if, artifacts.feature_names) if explain else None
 
     decisions: list[dict[str, Any]] = []
     fw = FirewallAutomation(artifacts.cfg) if enforce else None
@@ -137,6 +141,7 @@ def score_pcap(
     for idx, row in df.iterrows():
         z = artifacts.baseline.max_zscore(X.loc[idx])
         rd = scorer.score_row(row, bool(ml_anom.loc[idx]), z)
+        top3 = shap_x.top_k(X.loc[idx]) if (shap_x is not None and rd.action == "BLOCK") else []
         decisions.append(
             {
                 "flow_index": int(idx),
@@ -149,18 +154,20 @@ def score_pcap(
                 "risk_score": rd.score,
                 "action": rd.action,
                 "reasons": ",".join(rd.reasons),
+                "shap_top3": format_top_k(top3),
             }
         )
         if logger:
-            logger.append(
-                {
-                    "event": "flow_scored",
-                    "src_ip": row["src_ip"],
-                    "risk": rd.score,
-                    "action": rd.action,
-                    "reasons": rd.reasons,
-                }
-            )
+            event = {
+                "event": "flow_scored",
+                "src_ip": row["src_ip"],
+                "risk": rd.score,
+                "action": rd.action,
+                "reasons": rd.reasons,
+            }
+            if top3:
+                event["shap_top3"] = top3  # covered by the SHA-256 chain like every other field
+            logger.append(event)
         if enforce and fw is not None:
             sip = str(row["src_ip"])
             if rd.action == "BLOCK" and sip not in enforced_block:
@@ -171,6 +178,8 @@ def score_pcap(
                         {
                             "event": "iptables_block",
                             "src_ip": sip,
+                            "risk": rd.score,
+                            "shap_top3": top3,
                             "ok": r.ok,
                             "cmd": r.command,
                             "stdout": r.stdout,

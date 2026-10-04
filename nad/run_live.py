@@ -13,6 +13,7 @@ def main() -> None:
     parser.add_argument("--subnet", default=None)
     parser.add_argument("--log", default="defense_log.json")
     parser.add_argument("--enforce", action="store_true")
+    parser.add_argument("--no-shap", action="store_true", help="Skip SHAP top-3 features on BLOCK decisions")
 
     args = parser.parse_args()
 
@@ -25,7 +26,8 @@ def main() -> None:
         args.pcap,
         artifacts,
         log_path=log_path,
-        enforce=args.enforce
+        enforce=args.enforce,
+        explain=not args.no_shap,
     )
 
     # =========================
